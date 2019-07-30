@@ -35,36 +35,48 @@ private:
 public:
     // Define an iterator type for Pointer<T>.
     typedef Iter<T> GCiterator;
+    
     // Empty constructor
     // NOTE: templates aren't able to have prototypes with default arguments
     // this is why constructor is designed like this:
     Pointer(){
         Pointer(NULL);
     }
+    
     Pointer(T*);
+    
     // Copy constructor.
     Pointer(const Pointer &);
+    
     // Destructor for Pointer.
     ~Pointer();
+    
     // Collect garbage. Returns true if at least
     // one object was freed.
     static bool collect();
+    
     // Overload assignment of pointer to Pointer.
     T *operator=(T *t);
+    
     // Overload assignment of Pointer to Pointer.
     Pointer &operator=(Pointer &rv);
+    
     // Return a reference to the object pointed
     // to by this Pointer.
     T &operator*(){
         return *addr;
     }
+    
     // Return the address being pointed to.
     T *operator->() { return addr; }
+    
     // Return a reference to the object at the
     // index specified by i.
     T &operator[](int i){ return addr[i];}
+    
     // Conversion function to T *.
     operator T *() { return addr; }
+    
     // Return an Iter to the start of the allocated memory.
     Iter<T> begin(){
         int _size;
@@ -74,6 +86,7 @@ public:
             _size = 1;
         return Iter<T>(addr, addr, addr + _size);
     }
+    
     // Return an Iter to one past the end of an allocated array.
     Iter<T> end(){
         int _size;
@@ -83,6 +96,7 @@ public:
             _size = 1;
         return Iter<T>(addr + _size, addr, addr + _size);
     }
+    
     // Return the size of refContainer for this type of Pointer.
     static int refContainerSize() { return refContainer.size(); }
     // A utility function that displays refContainer.
@@ -95,12 +109,13 @@ public:
 // Creates storage for the static variables
 template <class T, int size>
 std::list<PtrDetails<T> > Pointer<T, size>::refContainer;
+
 template <class T, int size>
 bool Pointer<T, size>::first = true;
 
 // Constructor for both initialized and uninitialized objects. -> see class interface
-template<class T,int size>
-Pointer<T,size>::Pointer(T *t){
+template<class T, int size>
+Pointer<T, size>::Pointer(T *t){
     // Register shutdown() as an exit function.
     if (first)
         atexit(shutdown);
@@ -108,14 +123,44 @@ Pointer<T,size>::Pointer(T *t){
 
     // TODO: Implement Pointer constructor
     // Lab: Smart Pointer Project Lab
+    // to implement the GC Pointer constructor, you need to create a PtrDetails object, 
+    // and add it to the refContainer list. You also need to initialize Pointer member variables 
+    // (addr, isArray and arraySize). Then you can create an iterator, findPtrInfo for the address, 
+    // and increment the refcount.
+    typename std::list<PtrDetails<T> >::iterator p;
+    p = findPtrInfo(addr);
+    
+    // if this memory block is not registered yet, add it to refContainer
+    if (p == refContainer.end()) {
+        PtrDetails<T> pd(t, size);
+        refContainer.push_back(pd);
+    }
+    
+    // init attributes
+    addr = t;
+    arraySize = size;
+    isArray = (size > 0);
+    
+    // update refcount
+    p = findPtrInfo(addr);
+    p->refcount++;
+   
 
 }
 // Copy constructor.
 template< class T, int size>
-Pointer<T,size>::Pointer(const Pointer &ob){
+Pointer<T, size>::Pointer(const Pointer &ob){
 
     // TODO: Implement Pointer constructor
     // Lab: Smart Pointer Project Lab
+    addr = ob.addr;
+    arraySize = ob.arraySize;
+    isArray = ob.isArray;
+    
+    // update refcount
+    typename std::list<PtrDetails<T> >::iterator p;
+    p = findPtrInfo(addr);
+    p->refcount++;
 
 }
 
@@ -125,6 +170,22 @@ Pointer<T, size>::~Pointer(){
     
     // TODO: Implement Pointer destructor
     // Lab: New and Delete Project Lab
+    
+    
+    // TODO: Finalize Pointer destructor
+    // decrement ref count
+    typename std::list<PtrDetails<T>>::iterator p;
+    p = findPtrInfo(addr);
+    p->refcount--;   
+    
+    // Collect garbage when a pointer goes out of scope.
+    // collect() releases memories that does not have a pointer associated with it (refcount is 0)
+    collect();
+    
+    // For real use, you might want to collect unused memory less frequently,
+    // such as after refContainer has reached a certain size, after a certain number of Pointers have gone out of scope,
+    // or when memory is low.
+    
 }
 
 // Collect garbage. Returns true if at least
@@ -135,23 +196,89 @@ bool Pointer<T, size>::collect(){
     // TODO: Implement collect function
     // LAB: New and Delete Project Lab
     // Note: collect() will be called in the destructor
-    return false;
+    bool memfreed = false;
+    typename std::list<PtrDetails<T>>::iterator p;
+    
+    do {
+        // Scan refContainer looking for unreferenced pointers.
+        for (p = refContainer.begin(); p != refContainer.end(); p++){
+            // TODO: Implement collect()
+            // If in-use, skip.
+            if (p->refcount > 0) {
+                continue;
+            }
+            // Remove unused entry from refContainer.
+            // Free memory unless the Pointer is null.
+            if (p->isArray) {
+                delete[] p->memPtr;    
+            } else {
+                delete p->memPtr;
+            }
+            memfreed = true;
+            refContainer.erase(p);            
+            
+            // Restart the search because refContainer has changed
+            break;
+        }
+    } while (p != refContainer.end());
+    return memfreed;
 }
 
 // Overload assignment of pointer to Pointer.
 template <class T, int size>
 T *Pointer<T, size>::operator=(T *t){
 
-    // TODO: Implement operator==
+    // TODO: Implement operator=
     // LAB: Smart Pointer Project Lab
+    // In contrast to copy constructor, which is a constructor that creates new objects, 
+    // assignment replaces the contents of existing objects
+    // Therefore, we need to update refcount for both the old and new memory blocks the pointer points to
+    
+    // update old memory block refcount
+    typename std::list<PtrDetails<T>>::iterator p;
+    p = findPtrInfo(addr);
+    p->refcount--;
+    
+    // replace content of this Pointer object
+    addr = t;
+    arraySize = size;
+    isArray = (arraySize > 0);
+    
+    
+    // if this memory block is not registered yet, add it to refContainer
+    p = findPtrInfo(addr);
+    if (p == refContainer.end()) {
+        PtrDetails<T> pd(t, size);
+        refContainer.push_back(pd);
+    }
+    
+    // update new memory block refcount
+    p->refcount++;
 
+    return addr;   
 }
-// Overload assignment of Pointer to Pointer.
+
+// Overload assignment of Pointer reference to Pointer.
 template <class T, int size>
 Pointer<T, size> &Pointer<T, size>::operator=(Pointer &rv){
 
-    // TODO: Implement operator==
+    // TODO: Implement operator=
     // LAB: Smart Pointer Project Lab
+    // update old memory block refcount
+    typename std::list<PtrDetails<T>>::iterator p;
+    p = findPtrInfo(addr);
+    p->refcount--;
+    
+    // replace content of this Pointer object
+    addr = rv.addr;
+    arraySize = rv.arraySize;
+    isArray = rv.isArray;
+    
+    // update new memory block refcount
+    p = findPtrInfo(addr);
+    p->refcount++; 
+
+    return *this;
 
 }
 
